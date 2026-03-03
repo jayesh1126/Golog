@@ -1,201 +1,183 @@
-# Golog
+﻿# Golog
 
-Golog is a distributed log-based message broker written in Go.
+A minimal Kafka-like message broker written in Go.
 
-It is inspired by the core architectural principles of modern log-based
-systems such as Kafka, and was implemented from scratch to deeply
-understand the mechanics behind:
-
--   Append-only log storage
--   Partitioned topics
--   Offset-based consumption
--   Consumer groups
--   At-least-once delivery semantics
--   Backpressure and batching strategies
-
-The goal of this project is educational and architectural: to build a
-minimal but correct log-based messaging system and explore the
-trade-offs involved in durability, concurrency, and performance.
+Single-node, durable storage with partitioned topics, offset-based
+consumption, and auto-polling consumers.
 
 ------------------------------------------------------------------------
 
-# Motivation
+## Getting Started
 
-In production systems, I have worked extensively with Kafka powering
-real-time event pipelines, distributed services, and WebSocket streaming
-architectures. While using Kafka is operationally straightforward,
-understanding its internal guarantees --- log segmentation, offset
-tracking, partition coordination, and recovery --- requires implementing
-these mechanisms directly.
+### Start the Broker
 
-Golog exists to:
+``` bash
+go run cmd/broker/main.go
+```
 
--   Move from using a broker to implementing one
--   Explore concurrency primitives in Go
--   Understand durability and disk I/O trade-offs
--   Benchmark throughput and latency under load
--   Develop a deeper intuition for distributed log systems
+The broker listens on:
+
+    localhost:9092
+
+Messages are persisted to the `storage/` directory.
 
 ------------------------------------------------------------------------
 
-# Current Architecture
+### Run a Producer
 
-Golog is currently implemented as a single-node broker with durable,
-partitioned storage.
+``` bash
+go run cmd/producer/main.go
+```
 
-## Core Components
+The producer connects to the broker and waits for JSON input.
+
+Example request:
+
+``` json
+{
+  "type": "produce",
+  "topic": "orders",
+  "partition": 0,
+  "message": "order-123"
+}
+```
+
+Response:
+
+    ack offset 0
+
+------------------------------------------------------------------------
+
+### Run a Consumer
+
+``` bash
+go run cmd/consumer/main.go --topic orders --partition 0 --poll-interval 1s
+```
+
+The consumer:
+
+-   Polls the broker every 1 second
+-   Fetches new messages from the latest offset
+-   Tracks offsets automatically
+
+For interactive topic selection (without flags):
+
+``` bash
+go run cmd/consumer/main.go
+```
+
+------------------------------------------------------------------------
+
+## Architecture
 
 ### Broker
 
 -   TCP server built using Go's `net` package
 -   Goroutine per client connection
 -   Request routing for produce and fetch operations
--   Thread-safe partition access using `sync.RWMutex`
 
 ### Partition
 
-Each partition encapsulates: - In-memory message index - Append-only
-disk log file - Offset tracking - Concurrency control
+-   Append-only log
+-   In-memory index for fast reads
+-   Disk-backed persistence
+-   Offset derived from log length
 
-Messages are written to disk immediately and reconstructed on startup to
-ensure durability.
+### Concurrency
 
-### Storage Model
-
--   Append-only log per topic/partition
--   File-backed persistence
--   Crash recovery via log replay on broker startup
--   Offset derived from in-memory index length
-
-This mirrors the core storage abstraction used in real log-based
-systems.
-
-------------------------------------------------------------------------
-
-# Features Implemented
-
--   Topic and partition abstraction
--   Offset-based message consumption
--   Durable append-only storage
--   Crash recovery via log replay
--   Concurrent producers and consumers
--   Structured JSON request protocol
--   At-least-once delivery (consumer group groundwork implemented)
-
-------------------------------------------------------------------------
-
-# Concurrency Model
-
--   Goroutines handle concurrent client connections
--   RWMutex ensures safe read/write access to partition logs
--   Reads allow multiple concurrent consumers
+-   `sync.RWMutex` ensures thread-safe partition access
+-   Multiple readers allowed concurrently
 -   Writes are serialized per partition
 
-This design enables safe concurrent access without race conditions while
-maintaining simplicity.
+### Protocol
+
+-   JSON-based request/response format
+-   Simple and human-readable for development clarity
 
 ------------------------------------------------------------------------
 
-# Running the Project
+## Testing the System
 
-Start the broker:
+### Terminal 1 --- Start Broker
 
-    go run cmd/broker/main.go
+``` bash
+go run cmd/broker/main.go
+```
 
-Run a producer:
+### Terminal 2 --- Produce Messages
 
-    go run cmd/producer/main.go
+``` bash
+go run cmd/producer/main.go
+```
 
-Run a consumer:
+Then enter:
 
-    go run cmd/consumer/main.go
+``` json
+{
+  "type": "produce",
+  "topic": "test",
+  "partition": 0,
+  "message": "hello"
+}
+```
 
-Messages are persisted to the `storage/` directory.
+``` json
+{
+  "type": "produce",
+  "topic": "test",
+  "partition": 0,
+  "message": "world"
+}
+```
+
+### Terminal 3 --- Consume Messages
+
+``` bash
+go run cmd/consumer/main.go --topic test --partition 0
+```
+
+You should see the messages appear via auto-polling.
 
 ------------------------------------------------------------------------
 
-# Design Trade-offs
+## Design Decisions
 
--   Immediate disk writes favour durability over peak throughput
--   In-memory indexing keeps fetch operations simple and fast
--   JSON protocol chosen for clarity over network efficiency
--   Single-node design keeps focus on log semantics before distributed
+-   Immediate disk writes prioritise durability over peak throughput
+-   In-memory indexing keeps fetch operations efficient
+-   JSON protocol favours simplicity over network efficiency
+-   Single-node design focuses on log semantics before distributed
     complexity
 
 ------------------------------------------------------------------------
 
-# Benchmarking and Observability
+## Next Steps
 
-Initial performance testing focuses on:
+### Log Segmentation
 
--   Throughput under concurrent producers
--   Latency of fetch operations
--   Memory usage under sustained load
+-   Size-based log rotation
+-   Retention policies
+-   Segment compaction
 
-Future iterations will include profiling with `pprof` and batched write
-optimisation.
+### Replication
 
-------------------------------------------------------------------------
-
-# Possible Next Improvements
-
-## 1. Log Segmentation
-
--   Introduce segmented log files
--   Implement size-based rotation
--   Add retention policies
-
-## 2. Replication
-
--   Leader-follower partition replication
+-   Multi-node deployment
+-   Leader-follower model
 -   Quorum-based acknowledgements
--   Failure detection and leader election
 
-## 3. Consumer Group Coordination
+### Consumer Groups
 
 -   Partition rebalancing across consumers
 -   Persistent offset commits
--   Improved at-least-once guarantees
+-   Stronger delivery guarantees
 
-## 4. Performance Optimisation
+### Batching
 
--   Buffered and batched disk writes
--   Zero-copy network responses
--   Custom binary protocol for reduced overhead
+-   Buffered disk writes
+-   Reduced syscall overhead
+-   Throughput optimisation
 
-## 5. Backpressure Handling
-
--   Flow control between broker and consumers
--   Rate limiting for producers
--   Bounded in-memory buffers
-
-## 6. Observability
+### Observability
 
 -   Structured logging
--   Metrics exposure (Prometheus-compatible)
--   Distributed tracing integration
-
-------------------------------------------------------------------------
-
-# Long-Term Vision
-
-The long-term goal is to evolve Golog into a multi-node replicated log
-system capable of:
-
--   Stronger delivery guarantees
--   Horizontal scalability
--   Realistic production failure modes
--   Measurable performance characteristics
-
-The emphasis remains on architectural clarity, correctness, and deep
-understanding of distributed log design rather than feature parity.
-
-------------------------------------------------------------------------
-
-# Author
-
-Jay Utchanah\
-Software Engineer\
-
-This project reflects a practical exploration of distributed systems,
-storage engines, and concurrency in Go.
+-   Metrics exposure
+-   Profiling and benchmarking

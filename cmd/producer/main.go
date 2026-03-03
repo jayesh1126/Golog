@@ -7,6 +7,7 @@ import (
     "os"
 )
 
+// Producer is a simple client that connects to the broker and sends messages read from standard input.
 func main() {
     conn, _ := net.Dial("tcp", "localhost:9092")
     defer conn.Close()

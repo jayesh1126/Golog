@@ -11,6 +11,7 @@ import (
 	"golog/protocol"
 )
 
+// Partition represents a topic partition with an in-memory log and a file for persistence.
 type Partition struct {
 	topic string
 	id    int
@@ -19,17 +20,20 @@ type Partition struct {
 	mu    sync.RWMutex
 }
 
+// Broker manages topics and partitions, allowing producers to append messages and consumers to fetch them.
 type Broker struct {
 	topics map[string]map[int]*Partition
 	mu     sync.RWMutex
 }
 
+// NewBroker initializes a new Broker instance with an empty topics map.
 func NewBroker() *Broker {
 	return &Broker{
 		topics: make(map[string]map[int]*Partition),
 	}
 }
 
+// getOrCreatePartition retrieves an existing partition for the given topic and ID, or creates a new one if it doesn't exist, ensuring thread safety and loading existing messages from disk.
 func (b *Broker) getOrCreatePartition(topic string, id int) (*Partition, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -75,6 +79,7 @@ func (b *Broker) getOrCreatePartition(topic string, id int) (*Partition, error) 
 	return b.topics[topic][id], nil
 }
 
+// Append adds a new message to the partition's in-memory log and appends it to the corresponding file on disk, returning the offset of the new message or an error if the write operation fails.
 func (p *Partition) Append(message string) (int, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -93,6 +98,7 @@ func (p *Partition) Append(message string) (int, error) {
 	return offset, nil
 }
 
+// Start begins listening for incoming TCP connections on the specified address and handles them concurrently.
 func (b *Broker) Start(address string) {
     ln, err := net.Listen("tcp", address)
     if err != nil {
@@ -103,10 +109,12 @@ func (b *Broker) Start(address string) {
 
     for {
         conn, _ := ln.Accept()
+		// Handle each connection in a separate goroutine to allow concurrent processing of multiple clients.
         go b.handleConnection(conn)
     }
 }
 
+// handleConnection processes incoming messages from a client connection, handling both produce and fetch requests based on the message type.
 func (b *Broker) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
