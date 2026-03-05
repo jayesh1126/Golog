@@ -22,11 +22,18 @@ type Partition struct {
 
 // Broker manages topics and partitions, allowing producers to append messages and consumers to fetch them.
 type Broker struct {
+	// Capital B to make public so that cmd/broker can call newBroker and start it.
+	// The topics map is a nested map where the first key is the topic name and the second key is the partition ID, mapping to a Partition struct that holds the log and file for that partition.
 	topics map[string]map[int]*Partition
 	mu     sync.RWMutex
 }
 
 // NewBroker initializes a new Broker instance with an empty topics map.
+// Very important to return pointer for shared state. 
+// Passing by value would create a copy and changes wouldn't be reflected across the application. 
+// By returning a pointer, we ensure that all parts of the application are working with the same Broker instance and 
+// its state is consistent. This allows producers and consumers to interact with the same underlying data structures, 
+// enabling proper message handling and coordination.
 func NewBroker() *Broker {
 	return &Broker{
 		topics: make(map[string]map[int]*Partition),
@@ -35,7 +42,10 @@ func NewBroker() *Broker {
 
 // getOrCreatePartition retrieves an existing partition for the given topic and ID, or creates a new one if it doesn't exist, ensuring thread safety and loading existing messages from disk.
 func (b *Broker) getOrCreatePartition(topic string, id int) (*Partition, error) {
+	// Locking the broker's mutex to ensure thread safety when accessing and modifying the topics
 	b.mu.Lock()
+	// Unlocking is deferred to ensure it happens even if there's an error during partition creation or retrieval.
+	// This prevents potential deadlocks and ensures that the broker's state remains consistent.
 	defer b.mu.Unlock()
 
 	if b.topics[topic] == nil {
@@ -116,6 +126,8 @@ func (b *Broker) Start(address string) {
 
 // handleConnection processes incoming messages from a client connection, handling both produce and fetch requests based on the message type.
 func (b *Broker) handleConnection(conn net.Conn) {
+	// Defer closing the connection to ensure it happens when the function exits,
+	// preventing resource leaks and ensuring proper cleanup of network resources.
 	defer conn.Close()
 
 	scanner := bufio.NewScanner(conn)
@@ -163,6 +175,7 @@ func (b *Broker) handleConnection(conn net.Conn) {
 				continue
 			}
 
+			// Only read lock is needed here since we're not modifying the partition, just reading messages from it.
 			p.mu.RLock()
 			if int(req.Offset) < len(p.log) {
 				for i := int(req.Offset); i < len(p.log); i++ {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -14,11 +15,39 @@ import (
 	"golog/protocol"
 )
 
+// Reads the offset from disk for this consumer group
+func loadOffset(consumerGroup, topic string, partition int) int64 {
+	os.MkdirAll("storage", os.ModePerm)
+	offsetFile := filepath.Join("storage", fmt.Sprintf("%s-%s-%d.offset", consumerGroup, topic, partition))
+
+	data, err := os.ReadFile(offsetFile)
+	if err != nil {
+		// File doesn't exist yet, start from 0
+		return 0
+	}
+
+	offset, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
+	if err != nil {
+		return 0
+	}
+
+	return offset
+}
+
+// Writes the offset to disk for this consumer group
+func saveOffset(consumerGroup, topic string, partition int, offset int64) error {
+	os.MkdirAll("storage", os.ModePerm)
+	offsetFile := filepath.Join("storage", fmt.Sprintf("%s-%s-%d.offset", consumerGroup, topic, partition))
+
+	return os.WriteFile(offsetFile, []byte(fmt.Sprintf("%d\n", offset)), 0644)
+}
+
 // Consumer connects to the broker and polls for messages from a specific topic/partition.
 func main() {
 	// Parse command-line flags
 	topic := flag.String("topic", "", "Topic to consume from")
 	partition := flag.Int("partition", 0, "Partition to consume from")
+	consumerGroup := flag.String("group", "default", "Consumer group name")
 	pollInterval := flag.Duration("poll-interval", 1*time.Second, "Polling interval")
 	flag.Parse()
 
@@ -35,6 +64,12 @@ func main() {
 			p, _ := strconv.Atoi(s)
 			*partition = p
 		}
+
+		fmt.Print("Enter consumer group (default 'default'): ")
+		scanner.Scan()
+		if s := scanner.Text(); s != "" {
+			*consumerGroup = s
+		}
 	}
 
 	// Connect to broker
@@ -45,10 +80,12 @@ func main() {
 	}
 	defer conn.Close()
 
-	fmt.Printf("Connected to broker. Consuming from topic: %s, partition: %d\n", *topic, *partition)
-	fmt.Printf("Starting from offset 0, polling every %v\n\n", *pollInterval)
+	// Load offset from disk
+	offset := loadOffset(*consumerGroup, *topic, *partition)
 
-	offset := int64(0)
+	fmt.Printf("Connected to broker. Consuming from topic: %s, partition: %d, group: %s\n", *topic, *partition, *consumerGroup)
+	fmt.Printf("Starting from offset %d, polling every %v\n\n", offset, *pollInterval)
+
 	reader := bufio.NewReader(conn)
 
 	// Auto-polling loop
@@ -93,6 +130,8 @@ func main() {
 					n := 0
 					fmt.Sscanf(parts[1], "%d:", &n)
 					offset = int64(n + 1) // Move to next offset for next fetch
+					// Save offset to disk after processing each message
+					saveOffset(*consumerGroup, *topic, *partition, offset)
 				}
 			}
 		}

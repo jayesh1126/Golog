@@ -2,8 +2,16 @@
 
 A minimal Kafka-like message broker written in Go.
 
-Single-node, durable storage with partitioned topics, offset-based
-consumption, and auto-polling consumers.
+Single-node, durable storage with partitioned topics, offset-based consumption, persistent consumer offsets, and auto-polling consumers supporting independent consumer groups.
+
+## Current Features
+
+- Partitioned topics with append-only logs
+- Durable message storage
+- Offset-based message consumption
+- Persistent consumer offsets
+- Consumer groups with independent progress tracking
+- Concurrent producers and consumers
 
 ------------------------------------------------------------------------
 
@@ -51,14 +59,18 @@ Response:
 ### Run a Consumer
 
 ``` bash
-go run cmd/consumer/main.go --topic orders --partition 0 --poll-interval 1s
+go run cmd/consumer/main.go --topic orders --partition 0 --group group1 --poll-interval 1s
 ```
+The `--group` flag identifies the consumer group.
+
+Each group tracks its own offset independently, allowing multiple consumers to process the same topic without interfering with each other.
 
 The consumer:
 
--   Polls the broker every 1 second
--   Fetches new messages from the latest offset
--   Tracks offsets automatically
+- Polls the broker every 1 second
+- Fetches messages from the last committed offset
+- Persists offsets to disk after processing
+- Supports independent consumer groups
 
 For interactive topic selection (without flags):
 
@@ -94,6 +106,12 @@ go run cmd/consumer/main.go
 -   JSON-based request/response format
 -   Simple and human-readable for development clarity
 
+### Consumer Offsets
+
+Consumers persist their current offset to disk after processing messages.  
+On restart, the consumer reloads its last committed offset and resumes from that position.
+
+This provides simple fault tolerance and allows consumers to recover from crashes without reprocessing the entire log.
 ------------------------------------------------------------------------
 
 ## Testing the System
@@ -130,14 +148,35 @@ Then enter:
 }
 ```
 
-### Terminal 3 --- Consume Messages
+### Terminal 3 --- Start Consumer (Group 1)
 
 ``` bash
-go run cmd/consumer/main.go --topic test --partition 0
+go run cmd/consumer/main.go --topic test --partition 0 --group group1
 ```
 
-You should see the messages appear via auto-polling.
+You should see the messages appear via auto-polling and the consumer saves its offset to:
+storage/group1-test-0.offset
 
+### Terminal 3 --- Restart Consumer (Offset Recovery)
+
+Stop the consumer and run it again
+``` bash
+go run cmd/consumer/main.go --topic test --partition 0 --group group1
+```
+
+The consumer resumes from the last saved offset, avoiding reprocessing old messages.
+
+### Terminal 4 --- Start Another Consumer Group (Group 2)
+
+Stop the consumer and run it again
+``` bash
+go run cmd/consumer/main.go --topic test --partition 0 --group group2
+```
+
+This consumer starts from offset 0 because it has its own independent offset file:
+storage/analytics-test-0.offset
+
+Both groups can consume the same topic independently.
 ------------------------------------------------------------------------
 
 ## Design Decisions
@@ -166,9 +205,9 @@ You should see the messages appear via auto-polling.
 
 ### Consumer Groups
 
--   Partition rebalancing across consumers
--   Persistent offset commits
--   Stronger delivery guarantees
+- Partition rebalancing across consumers
+- Broker-managed offset storage
+- Heartbeats and group coordination
 
 ### Batching
 
