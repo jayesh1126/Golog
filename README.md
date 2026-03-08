@@ -104,22 +104,6 @@ storage/
   orders-0-10.log     (partition 0, messages 10-19)
   orders-1-0.log      (partition 1, messages 0-9)
 ```
-### Consumer Groups
-
-- Multiple consumers can join the same group
-- Broker performs **round-robin partition assignment**
-- Each partition is assigned to exactly one consumer in a group
-- **Rebalancing** occurs when consumers join/leave
-- Generation IDs ensure consistency during rebalancing
-- **Heartbeats** keep consumers alive (every 3 seconds)
-
-**Example rebalancing:**
-```
-1 consumer joins:  [consumer-1] → assigned partitions [0, 1, 2, 3]
-2nd consumer joins: 
-  [consumer-1] → rebalanced to [0, 2]
-  [consumer-2] → rebalanced to [1, 3]
-```
 
 ### Concurrency
 
