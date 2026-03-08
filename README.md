@@ -6,12 +6,13 @@ Single-node, durable storage with partitioned topics, offset-based consumption, 
 
 ## Current Features
 
-- Partitioned topics with append-only logs
-- Durable message storage
-- Offset-based message consumption
-- Persistent consumer offsets
-- Consumer groups with independent progress tracking
-- Concurrent producers and consumers
+-  **Partitioned Topics** with append-only logs
+- **Log Segmentation** with automatic rotation (max 10 messages per segment)
+- **Durable Message Storage** persisted to disk
+- **Offset-based Consumption** with efficient segment indexing
+- **Persistent Consumer Offsets** tracked per consumer group
+- **Concurrent Producers and Consumers** via goroutines
+- **Thread-safe Operations** with fine-grained locking (sync.RWMutex)
 
 ------------------------------------------------------------------------
 
@@ -88,12 +89,37 @@ go run cmd/consumer/main.go
 -   Goroutine per client connection
 -   Request routing for produce and fetch operations
 
-### Partition
+### Partition & Segments
 
--   Append-only log
--   In-memory index for fast reads
--   Disk-backed persistence
--   Offset derived from log length
+- Append-only log split into **segments** for scalability
+- Each segment stores up to 10 messages
+- Segments persist to disk as `{topic}-{partition}-{baseOffset}.log`
+- On startup, broker reloads all segments from disk
+- Offsets are derived from segment base offset + message index
+
+**Example file structure:**
+```
+storage/
+  orders-0-0.log      (partition 0, messages 0-9)
+  orders-0-10.log     (partition 0, messages 10-19)
+  orders-1-0.log      (partition 1, messages 0-9)
+```
+### Consumer Groups
+
+- Multiple consumers can join the same group
+- Broker performs **round-robin partition assignment**
+- Each partition is assigned to exactly one consumer in a group
+- **Rebalancing** occurs when consumers join/leave
+- Generation IDs ensure consistency during rebalancing
+- **Heartbeats** keep consumers alive (every 3 seconds)
+
+**Example rebalancing:**
+```
+1 consumer joins:  [consumer-1] → assigned partitions [0, 1, 2, 3]
+2nd consumer joins: 
+  [consumer-1] → rebalanced to [0, 2]
+  [consumer-2] → rebalanced to [1, 3]
+```
 
 ### Concurrency
 
@@ -108,10 +134,12 @@ go run cmd/consumer/main.go
 
 ### Consumer Offsets
 
-Consumers persist their current offset to disk after processing messages.  
-On restart, the consumer reloads its last committed offset and resumes from that position.
+Offsets are persisted to `storage/{consumer-group}-{topic}-{partition}.offset`:
+- Each consumer group tracks progress independently
+- Offsets saved to disk after processing messages
+- On restart, consumers resume from last committed offset
+- Enables fault tolerance and crash recovery
 
-This provides simple fault tolerance and allows consumers to recover from crashes without reprocessing the entire log.
 ------------------------------------------------------------------------
 
 ## Testing the System
@@ -190,12 +218,6 @@ Both groups can consume the same topic independently.
 ------------------------------------------------------------------------
 
 ## Next Steps
-
-### Log Segmentation
-
--   Size-based log rotation
--   Retention policies
--   Segment compaction
 
 ### Replication
 
